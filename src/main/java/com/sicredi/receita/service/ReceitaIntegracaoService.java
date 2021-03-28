@@ -1,16 +1,16 @@
 package com.sicredi.receita.service;
 
-import com.sicredi.receita.dto.IntegracaoReceitaRespostaDTO;
+import com.google.common.collect.Lists;
+import com.opencsv.*;
+import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.sicredi.receita.dto.RespostaDTO;
-import com.sicredi.receita.util.CsvUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.io.*;
 import java.text.NumberFormat;
 import java.text.ParseException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -23,38 +23,67 @@ public class ReceitaIntegracaoService {
     private static final int COLUNA_SALDO = 2;
     private static final int COLUNA_STATUS = 3;
 
+    public static final String ATUALIZADO = "Atualizado";
+    public static final String NAO_ATUALIZADO_ERRO_INESPERADO = "Não atualizado: Erro inesperado no serviço da receita";
+    public static final String NAO_ATUALIZADO_ERRO_FORMATACAO_LINHA = "Não atualizado: Erro na formatação da linha";
+
+
     private static final NumberFormat format = NumberFormat.getInstance(Locale.getDefault());
 
     private final ReceitaService receitaService = new ReceitaService();
 
-    public RespostaDTO<List<IntegracaoReceitaRespostaDTO>> processaEnviaCsvReceita(MultipartFile csvFile) throws IOException, ParseException, InterruptedException {
-        List<String[]> linhas = CsvUtil.leEConverteCsv(csvFile);
-        List<IntegracaoReceitaRespostaDTO> linhasNaoAtualizadas = this.enviaListaDeInformacaoParaReceita(linhas);
-        return RespostaDTO.<List<IntegracaoReceitaRespostaDTO>>builder()
-                .data(linhasNaoAtualizadas)
+    public RespostaDTO<ByteArrayOutputStream> processaEnviaCsvReceita(MultipartFile csvFile) throws IOException, ParseException, InterruptedException {
+        //PREPARA O LEITOR CSV
+        InputStream targetStream = csvFile.getInputStream();
+        CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build(); // separador
+
+        //PREPARA O ARQUIVO A SER ENVIADO
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(out);
+        CSVWriter csvWriter = new CSVWriter(new OutputStreamWriter(bufferedOutputStream));
+
+        //TENTA CRIAR O LEITOR
+        try (CSVReader csvReader = new CSVReaderBuilder(
+                new InputStreamReader(targetStream))
+                .withCSVParser(csvParser)   // adiciona o parser
+                .withFieldAsNull(CSVReaderNullFieldIndicator.EMPTY_SEPARATORS) //campo null = vazio no arquivo
+                .build()) {
+
+            //ADICIONA COLUNA NO CABECALHO
+            this.adicionaCabecalho(csvReader, csvWriter);
+
+            String[] colunasPorLinha = null;
+            //ITERAÇÃO LINHA POR LINHA DO CSV
+            while ((colunasPorLinha = csvReader.readNext()) != null) {
+                String resposta = this.enviaLinhaInformacaoParaReceita(colunasPorLinha);
+                List<String> list = Lists.newArrayList(colunasPorLinha);
+                list.add(resposta);
+                csvWriter.writeNext(list.toArray(new String[0]));
+            }
+            csvWriter.close();
+        }
+
+        return RespostaDTO.<ByteArrayOutputStream>builder()
+                .data(out)
                 .build();
     }
 
-    public List<IntegracaoReceitaRespostaDTO> enviaListaDeInformacaoParaReceita(List<String[]> linhas) throws ParseException, InterruptedException {
-        List<IntegracaoReceitaRespostaDTO> linhasNaoAtualizadas = new ArrayList<>();
-        for(int i = 0; i < linhas.size(); i++){
-            String[] linha = linhas.get(i);
-            boolean sucesso;
-            try{
-                sucesso = receitaService.atualizarConta(linha[COLUNA_AGENCIA], linha[COLUNA_CONTA].replaceAll("-", ""), format.parse(linha[COLUNA_SALDO]).doubleValue(), linha[COLUNA_STATUS]);
-            }catch (RuntimeException e){
-                linhasNaoAtualizadas.add(IntegracaoReceitaRespostaDTO.builder()
-                        .linhaNaoAtualizada(i+1)
-                        .motivo("Erro inesperado no serviço da receita")
-                        .build());
-                continue;
-            }
-            if(!sucesso)
-                linhasNaoAtualizadas.add(IntegracaoReceitaRespostaDTO.builder()
-                        .linhaNaoAtualizada(i+1)
-                        .motivo("Linha com informação incorreta")
-                        .build());
+    public void adicionaCabecalho(CSVReader csvReader, CSVWriter csvWriter) throws IOException {
+        List<String> cabecalho = Lists.newArrayList(csvReader.readNext());
+        cabecalho.add("resultado");
+        csvWriter.writeNext(cabecalho.toArray(new String[0]));
+    }
+
+    public String enviaLinhaInformacaoParaReceita(String[] linha) throws ParseException, InterruptedException {
+        boolean sucesso;
+        try{
+            sucesso = receitaService.atualizarConta(linha[COLUNA_AGENCIA], linha[COLUNA_CONTA].replaceAll("-", ""), format.parse(linha[COLUNA_SALDO]).doubleValue(), linha[COLUNA_STATUS]);
+        }catch (RuntimeException e){
+            return NAO_ATUALIZADO_ERRO_INESPERADO;
         }
-        return linhasNaoAtualizadas;
+        if(!sucesso)
+            return NAO_ATUALIZADO_ERRO_FORMATACAO_LINHA;
+        else
+            return ATUALIZADO;
     }
 }

@@ -1,10 +1,11 @@
 package com.sicredi.receita.service;
 
-import com.sicredi.receita.dto.IntegracaoReceitaRespostaDTO;
-import com.sicredi.receita.util.CsvUtil;
+import com.sicredi.receita.dto.RespostaDTO;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.BDDMockito;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockMultipartFile;
@@ -14,8 +15,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
 
 @RunWith(SpringRunner.class)
 @SpringBootTest
@@ -28,25 +29,23 @@ public class ReceitaIntegracaoServiceTest {
 
 
     @Test
-    public void shouldConverterCsv() throws IOException {
-        File file = new File("teste.csv");
-        FileInputStream input = new FileInputStream(file);
-        MultipartFile multipartFile = new MockMultipartFile("teste.csv", input);
-        List<String[]> strings = CsvUtil.leEConverteCsv(multipartFile);
-        Assertions.assertThat(strings.size()).isGreaterThanOrEqualTo(1);
-        Assertions.assertThat(strings.get(0)[0]).isEqualTo("0101");
+    public void shouldProcessarCsvReceita() throws ParseException, InterruptedException, IOException {
+        ReceitaIntegracaoService mock = Mockito.mock(ReceitaIntegracaoService.class);
+        BDDMockito.when(mock.enviaLinhaInformacaoParaReceita(any(String[].class)))
+                .thenReturn(ReceitaIntegracaoService.ATUALIZADO);
+        BDDMockito.when(mock.processaEnviaCsvReceita(any(MultipartFile.class)))
+                .thenCallRealMethod();
+        File file = new File("src/test/java/com/sicredi/receita/teste.csv");
+        FileInputStream fileInputStream = new FileInputStream(file);
+        MultipartFile multipartFile = new MockMultipartFile("teste.csv", fileInputStream);
+        RespostaDTO<ByteArrayOutputStream> resposta = mock.processaEnviaCsvReceita(multipartFile);
+        Assertions.assertThat((long) resposta.getData().size()).isGreaterThanOrEqualTo(multipartFile.getSize());
     }
 
     @Test
     public void shouldEnviarCsvReceita() throws ParseException, InterruptedException {
         String[] linha1 = new String[]{"0101", "12225-6", "100,00", "A"};
-        String[] linha2 = new String[]{"0101", "12226-8", "3200,50", "A"};
-        String[] linha3 = new String[]{"3202", "40011-1", "35,12", "I"};
-        List<String[]> listaDeInformacao = new ArrayList<>();
-        listaDeInformacao.add(linha1);
-        listaDeInformacao.add(linha2);
-        listaDeInformacao.add(linha3);
-        List<IntegracaoReceitaRespostaDTO> integracaoReceitaRespostaDTOS = receitaIntegracaoService.enviaListaDeInformacaoParaReceita(listaDeInformacao);
-        Assertions.assertThat(integracaoReceitaRespostaDTOS).isEmpty();
+        String resposta = receitaIntegracaoService.enviaLinhaInformacaoParaReceita(linha1);
+        Assertions.assertThat(resposta).isEqualTo(ReceitaIntegracaoService.ATUALIZADO);
     }
 }
