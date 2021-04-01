@@ -31,7 +31,7 @@ public class ReceitaIntegracaoService {
 
     private static final NumberFormat format = NumberFormat.getInstance(Locale.getDefault());
 
-    private final ReceitaService receitaService;
+    private final ReceitaService receitaService = new ReceitaService();
 
     public RespostaDTO<ByteArrayOutputStream> processaEnviaCsvReceita(MultipartFile csvFile) throws IOException, ParseException, InterruptedException {
         InputStream targetStream = csvFile.getInputStream();
