@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
 import com.opencsv.*;
 import com.opencsv.enums.CSVReaderNullFieldIndicator;
 import com.sicredi.receita.dto.RespostaDTO;
+import com.sicredi.receita.exception.CsvParseException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -30,32 +31,23 @@ public class ReceitaIntegracaoService {
 
     private static final NumberFormat format = NumberFormat.getInstance(Locale.getDefault());
 
-    private final ReceitaService receitaService = new ReceitaService();
+    private final ReceitaService receitaService;
 
     public RespostaDTO<ByteArrayOutputStream> processaEnviaCsvReceita(MultipartFile csvFile) throws IOException, ParseException, InterruptedException {
-        //PREPARA O LEITOR CSV
         InputStream targetStream = csvFile.getInputStream();
-        CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build(); // separador
+        CSVParser csvParser = new CSVParserBuilder().withSeparator(';').build();
 
-        //PREPARA O ARQUIVO A SER ENVIADO
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(out);
         CSVWriter csvWriter = new CSVWriter(new OutputStreamWriter(bufferedOutputStream));
 
-        //TENTA CRIAR O LEITOR
-        try (CSVReader csvReader = new CSVReaderBuilder(
-                new InputStreamReader(targetStream))
-                .withCSVParser(csvParser)   // adiciona o parser
-                .withFieldAsNull(CSVReaderNullFieldIndicator.EMPTY_SEPARATORS) //campo null = vazio no arquivo
-                .build()) {
-
-            //ADICIONA COLUNA NO CABECALHO
+        try (CSVReader csvReader = this.buildCsvReader(targetStream, csvParser)) {
             this.adicionaCabecalho(csvReader, csvWriter);
 
             String[] colunasPorLinha = null;
-            //ITERAÇÃO LINHA POR LINHA DO CSV
+            int linhaAtual = 2;
             while ((colunasPorLinha = csvReader.readNext()) != null) {
-                String resposta = this.enviaLinhaInformacaoParaReceita(colunasPorLinha);
+                String resposta = this.processaLinhaParaReceita(colunasPorLinha, linhaAtual);
                 List<String> list = Lists.newArrayList(colunasPorLinha);
                 list.add(resposta);
                 csvWriter.writeNext(list.toArray(new String[0]));
@@ -68,16 +60,26 @@ public class ReceitaIntegracaoService {
                 .build();
     }
 
-    public void adicionaCabecalho(CSVReader csvReader, CSVWriter csvWriter) throws IOException {
+    private CSVReader buildCsvReader(InputStream targetStream, CSVParser csvParser){
+        return new CSVReaderBuilder(
+                new InputStreamReader(targetStream))
+                .withCSVParser(csvParser)
+                .withFieldAsNull(CSVReaderNullFieldIndicator.EMPTY_SEPARATORS)
+                .build();
+    }
+
+    private void adicionaCabecalho(CSVReader csvReader, CSVWriter csvWriter) throws IOException {
         List<String> cabecalho = Lists.newArrayList(csvReader.readNext());
         cabecalho.add("resultado");
         csvWriter.writeNext(cabecalho.toArray(new String[0]));
     }
 
-    public String enviaLinhaInformacaoParaReceita(String[] linha) throws ParseException, InterruptedException {
+    protected String processaLinhaParaReceita(String[] linha, int linhaPosicao) throws ParseException, InterruptedException {
         boolean sucesso;
         try{
-            sucesso = receitaService.atualizarConta(linha[COLUNA_AGENCIA], linha[COLUNA_CONTA].replaceAll("-", ""), format.parse(linha[COLUNA_SALDO]).doubleValue(), linha[COLUNA_STATUS]);
+            sucesso = this.enviaInformacaoParaReceita(linha);
+        }catch (IndexOutOfBoundsException ex){
+            throw new CsvParseException("Linha "+linhaPosicao+ " inválida");
         }catch (RuntimeException e){
             return NAO_ATUALIZADO_ERRO_INESPERADO;
         }
@@ -85,5 +87,9 @@ public class ReceitaIntegracaoService {
             return NAO_ATUALIZADO_ERRO_FORMATACAO_LINHA;
         else
             return ATUALIZADO;
+    }
+
+    protected boolean enviaInformacaoParaReceita(String[] informacoes) throws ParseException, InterruptedException {
+        return receitaService.atualizarConta(informacoes[COLUNA_AGENCIA], informacoes[COLUNA_CONTA].replaceAll("-", ""), format.parse(informacoes[COLUNA_SALDO]).doubleValue(), informacoes[COLUNA_STATUS]);
     }
 }
